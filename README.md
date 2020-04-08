@@ -11,4 +11,5 @@ A tool for renaming files on web-based Baidu Netdisk. 百度网盘网页版的�
 1. Rename any file you want
 
 ## Screenshots
-![](https://github.com/neotan/baidu-netdisk-rename/blob/master/baidu-netdisk-rename.png?raw=true)
+![](https://github.com/neotan/baidu-netdisk-rename/blob/master/baidu-netdisk-rename1.png?raw=true)
+![](https://github.com/neotan/baidu-netdisk-rename/blob/master/baidu-netdisk-rename2.png?raw=true)
