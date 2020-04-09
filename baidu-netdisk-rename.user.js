@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         baidu-netdisk-rename
 // @namespace    http://tampermonkey.net/
-// @version      0.2
-// @description  A tool for renaming files on web-based Baidu Netdisk 百度网盘网页版的文件重命名脚本
+// @version      0.3
+// @description  Renaming tool for web-based version of baidu netdisk. It supports batch renaming. 百度网盘的重命名小工具，支持批量重命名。
 // @author       neotan
 // @match        https://pan.baidu.com/disk/*
 // @grant        GM_addStyle
@@ -11,23 +11,48 @@
 // @resource     responsiveCss https://cdn.jsdelivr.net/npm/purecss@1.0.1/build/grids-responsive-min.css
 // ==/UserScript==
 
-;(async function() {
+;(async function () {
   'use strict'
 
   // ------------------- Utilities START ------------------- //
+  function getMeta() {
+    var filemanagerUrl
+    var taskqueryUrl
 
-  var filemanagerUrl = 'https://pan.baidu.com/api/filemanager?opera=rename&async=2&onnest=fail&channel=chunlei&web=1&app_id=250528&bdstoken=19242d6d3971529615284f88b3e97255&logid=MTU4NDcwNjcxNjE5NzAuNDI5MDIyMzE5MjMwMzE3NzU=&clienttype=0'
-  var taskqueryUrl ='https://pan.baidu.com/share/taskquery?taskid=139129799582709&channel=chunlei&web=1&app_id=250528&bdstoken=19242d6d3971529615284f88b3e97255&logid=MTU4NDcwNjcxNzk0NzAuMTg4MjI5NjY1MjE1NjQ0Nzc=&clienttype=0'
+    try {
+      var scriptTag = $('script').filter((i, ctt) => {
+        return !ctt.src && ctt.text.includes('bdstoken')
+      })[0]
+      var txt = scriptTag.text.match(/var context=([\s\S]*?)var yunData/).pop().trim()
+      var meta = JSON.parse(txt.slice(0, -1))
+
+      if (meta && meta.bdstoken) {
+        filemanagerUrl = `https://pan.baidu.com/api/filemanager?opera=rename&async=2&onnest=fail&channel=chunlei&web=1&app_id=250528&bdstoken=${meta.bdstoken}&clienttype=0`
+        taskqueryUrl = `https://pan.baidu.com/share/taskquery?taskid=1052678625270016&channel=chunlei&web=1&app_id=250528&bdstoken=${meta.bdstoken}&clienttype=0`
+      }
+    } catch (e) {
+      console.error(e)
+    }
+
+    return {
+      filemanagerUrl,
+      taskqueryUrl,
+    }
+  }
 
   function getFileNames() {
     var nodes = document.querySelectorAll('.file-name .text a')
     return [...nodes].map(n => n.textContent)
   }
 
-  function createFileName(oldName, searchStr, replaceStr, applyToAll, caseSenstive) {
+  function escapeRegExp(str) {
+    return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
+  }
+
+  function createFileName(oldName, searchStr, replaceStr, applyToAll, caseSenstive, useRegexp = true) {
     var g = applyToAll ? 'g' : ''
     var i = caseSenstive ? '' : 'i'
-    var rex = new RegExp(searchStr, g + i)
+    var rex = new RegExp(escapeRegExp(searchStr), g + i)
 
     return oldName.replace(rex, replaceStr)
   }
@@ -37,20 +62,31 @@
     var urlParams = new URLSearchParams(addr.substring(addr.indexOf('?') + 1))
     var cwd = urlParams.get('path')
     if (!cwd) {
-      throw new Error("Can't get current working directory.")
+      throw new Error('Can\'t get current working directory.')
     }
     return cwd
   }
 
-  function getActions(cwd, fileNames, searchStr, replaceStr, applyToAll = true, caseSenstive = false) {
-      return fileNames
-      .map(name => {
-        var path = cwd + '/' + name
-        var newname = createFileName(name, searchStr, replaceStr, applyToAll, caseSenstive)
+  function getBatchActions(cwd, batchText, applyToAll = true, caseSenstive = false, separator) {
+    if (batchText && separator) {
+      return batchText
+        .split('\n')
+        .map(line => {
+          line = line.trim()
+          var namingPair = line.split(separator)
+          if (namingPair && namingPair.length === 2) {
+            return getAction(cwd, namingPair[0].trim(), namingPair[0].trim(), namingPair[1].trim(), applyToAll, caseSenstive)
+          }
+        })
+        .filter(action => action)
+    }
+  }
 
-        return name !== newname ? { path, newname } : ''
-      })
-      .filter(action => action)
+  function getAction(cwd, fileName, searchStr, replaceStr, applyToAll = true, caseSenstive = false) {
+    var path = cwd + '/' + fileName
+    var newname = createFileName(fileName, searchStr, replaceStr, applyToAll, caseSenstive)
+
+    return fileName !== newname ? {path, newname} : ''
   }
 
   function getFormData(actions) {
@@ -60,8 +96,8 @@
     return formData
   }
 
-  function showMsg(msg){
-    $('.msg').text(msg).show('slow').delay(10000).hide(500)
+  function showMsg(msg) {
+    $('.msg').html(msg).show('slow').delay(10000).hide(500)
   }
 
   function postData(url, formData) {
@@ -74,10 +110,32 @@
       .then(res => console.log('Response:', res))
   }
 
+  function toBatchMode() {
+    $('.single-mode').map(function () {
+      $(this).slideUp(() => {
+        $('.batch-mode').map(function () {
+          $(this).slideDown()
+        })
+      })
+    })
+
+  }
+
+  function toSingleMode() {
+    $('.batch-mode').map(function () {
+      $(this).slideUp(() => {
+        $('.single-mode').map(function () {
+          $(this).slideDown()
+        })
+      })
+    })
+  }
+
   // ------------------- Utilities END ------------------- //
 
   // ------------------- Main Functions declaration START ------------------- //
   var msg = ''
+  var isBatchMode = $('.batch-switcher').prop('checked', true)
   var customCss = `
         .pure-g {
           padding: 5px;
@@ -85,33 +143,84 @@
           align-items: center;
           background: #f1f1f1;
         }
-        .rename-form {
-          width: 100%;
-        }
-        .rename-form > label:not(:first-child), button:not(:first-child) {
-          margin-left: 5px;
-        }
-        .outter{
+        .netdisk-rename{
           display: flex;
         }
+        .rename-form {
+          width: 100%;
+          display: none;
+        }
+        .rename-form > label {
+          white-space: nowrap;
+        }
+        .rename-btn-wrapper > label:not(:first-child) {
+            margin-left: 10px;
+        }
+        .rename-form__input-text {
+          width: 80%;
+        }
+        .rename-btn-wrapper > label:not(:last-child) {
+          margin-right: 10px;
+        }
         .msg{
-          background: #b1e279
+          background: #b1e279;
+          padding: 8px 10px;
+          display: none;
+        }
+        .toggle-btn{
+          font-size: 10px;
+          position: absolute;
+          top: 0;
+          left: 0;
+          z-index: 2147483647;
+          width: 26px;
+          transition: all .2s;
+        }
+        .rename-btn{
+          width: 100%;
+        }
+        .rename-btn-wrapper{
+           display: flex;
+        }
+        .author-label{
+          font-size: 1.3rem;
+        }
+        .batch-mode{
+           display: none;
+        }
+        .enlarge {
+          width: 100px;
+          height: 30px;
+          font-size: 12px;
         }
 `
   var domHtml = `
-<div class="outter">
-      <button class="pure-button pure-button-primary toggle-btn">Toggle</button>
-      <form class="pure-g pure-form rename-form">
-          <label class="pure-u-1 pure-u-xl-4-24 pure-u-lg-8-24">Replace: <input type="text" name="searchStr" value=""/></label>
-          <label class="pure-u-1 pure-u-xl-4-24 pure-u-lg-8-24">with: <input type="text" name="replaceStr" value=""/></label>
-          <label class="pure-u-1 pure-u-xl-3-24 pure-u-lg-8-24">Extension: <input type="text" name="extention" size=10 value=".mp4" placeholder="all files"/></label>
-          <label class="pure-u-1 pure-u-xl-3-24 pure-u-lg-8-24 pure-button">Case Senstive? <input type="checkbox" name="caseSenstive" checked></label>
-          <label class="pure-u-1 pure-u-xl-3-24 pure-u-lg-8-24 pure-button">Apply to all? <input type="checkbox" name="applyToAll" checked></label>
-
-          <button type="submit" class="pure-u-1 pure-u-xl-3-24 pure-u-lg-6-24 pure-button pure-button-primary">Rename!</button>
-        <a class="pure-link author-label" href="https://greasyfork.org/en/scripts/398489-baidu-netdisk-rename">&#9784;</a>
-      </form>
-      <div class="msg">${msg}</div>
+<div class="netdisk-rename">
+  <button class="pure-button pure-button-primary toggle-btn" title="Toggle Netdisk renaming panel">R</button>
+  <form class="pure-g pure-form rename-form">
+    <div class="rename-btn-wrapper">
+       <label class="pure-u-1 pure-button">Case Senstive? <input type="checkbox" name="caseSenstive" checked></label>
+       <label class="pure-u-1 pure-button">Apply to all? <input type="checkbox" name="applyToAll" checked></label>
+       <label class="pure-u-1 pure-button">Batch <input type="checkbox" class="batch-switcher" name="isBatchMode"></label>
+       <button class="pure-button pure-button-primary rename-btn" type="submit">Rename</button>
+       <a class="pure-link author-label" href="https://greasyfork.org/en/scripts/398489-baidu-netdisk-rename">&#9784;</a>
+    </div>
+    <div class="single-mode">
+      <label class="pure-u-8-24">Replace: <input class="rename-form__input-text" type="text" name="searchStr"/></label>
+      <label class="pure-u-8-24">with: <input class="rename-form__input-text" type="text" name="replaceStr"/></label>
+      <label class="pure-u-7-24">Extension: <input class="rename-form__input-text" type="text" name="extention" size=10 value=".mp4" placeholder="all files"/></label>
+    </div>
+    <div class="batch-mode">
+      <label class="pure-u-8-24">Separator: <input class="rename-form__input-text" type="text" name="separator" value="###"/></label>
+      <label class="pure-u-1">
+        <textarea class="pure-u-1" name="batchText" rows="4">
+           oldName1 ### newName1
+           oldName2 ### newName2
+        </textarea>
+      </label>
+    </div>
+    <div class="pure-u-1 msg">${msg}</div>
+  </form>
 </div>
 `
 
@@ -122,10 +231,14 @@
     $('#layoutMain').prepend($(domHtml))
 
     // initiate listeners
+    $('.toggle-btn').hover(function () {
+      $(this).addClass('enlarge').text('Rename Panel')
+    }, function () {
+      $(this).removeClass('enlarge').text('R')
+    })
     $('.toggle-btn').click(() => $('.rename-form').slideToggle('fast'))
-    $('.rename-form').submit(function(event) {
+    $('.rename-form').submit(function (event) {
       event.preventDefault()
-
       var urlParams = new URLSearchParams($(this).serialize())
       var searchStr = urlParams.get('searchStr')
       var replaceStr = urlParams.get('replaceStr')
@@ -133,17 +246,37 @@
       var applyToAll = urlParams.get('applyToAll')
       var caseSenstive = urlParams.get('caseSenstive')
 
+      var isBatchMode = urlParams.get('isBatchMode')
+      var batchText = urlParams.get('batchText')
+      var separator = urlParams.get('separator')
+
       var fileNames = getFileNames().filter(name => name.endsWith(extention))
+      var cwd = getCWD()
 
-      var actions = getActions(getCWD(), fileNames, searchStr, replaceStr, applyToAll, caseSenstive)
+      var actions = []
+      if (isBatchMode) {
+        actions = getBatchActions(cwd, batchText, applyToAll = true, caseSenstive = false, separator)
+      } else {
+        actions = fileNames.map(fileName => getAction(cwd, fileName, searchStr, replaceStr, applyToAll, caseSenstive)).filter(action => action)
+      }
+
       var formData = getFormData(actions)
+      var {filemanagerUrl, taskqueryUrl} = getMeta()
 
-      if (actions.length> 0) {
+      if (actions.length > 0 && filemanagerUrl && taskqueryUrl) {
         postData(filemanagerUrl, formData)
         postData(taskqueryUrl, formData)
-        showMsg(`${actions.length} files renamed! Please REFRESH the page.`)
+        showMsg(`Tried renaming ${actions.length} files, please <a onclick="location.reload()" style="cursor:pointer;">Refresh</a> for result.`)
       } else {
         showMsg('Nothing matched!')
+      }
+    })
+
+    $('.batch-switcher').change(function () {
+      if (this.checked) {
+        toBatchMode()
+      } else {
+        toSingleMode()
       }
     })
     console.log('baidu-netdisk-rename initiated!')
