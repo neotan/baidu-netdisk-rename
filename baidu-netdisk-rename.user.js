@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         baidu-netdisk-rename
 // @namespace    http://tampermonkey.net/
-// @version      0.3
+// @version      0.5
 // @description  Renaming tool for web-based version of baidu netdisk. It supports batch renaming. 百度网盘的重命名小工具，支持批量重命名。
 // @author       neotan
 // @match        https://pan.baidu.com/disk/*
@@ -9,6 +9,7 @@
 // @grant        GM_getResourceText
 // @resource     purecss https://cdn.jsdelivr.net/npm/purecss@1.0.1/build/pure-min.min.css
 // @resource     responsiveCss https://cdn.jsdelivr.net/npm/purecss@1.0.1/build/grids-responsive-min.css
+// @license      MIT
 // ==/UserScript==
 
 ;(async function () {
@@ -21,14 +22,13 @@
 
     try {
       var scriptTag = $('script').filter((i, ctt) => {
-        return !ctt.src && ctt.text.includes('bdstoken')
+        return !ctt.src && ctt.text.includes('"bdstoken":"')
       })[0]
-      var txt = scriptTag.text.match(/var context=([\s\S]*?)var yunData/).pop().trim()
-      var meta = JSON.parse(txt.slice(0, -1))
-
-      if (meta && meta.bdstoken) {
-        filemanagerUrl = `https://pan.baidu.com/api/filemanager?opera=rename&async=2&onnest=fail&channel=chunlei&web=1&app_id=250528&bdstoken=${meta.bdstoken}&clienttype=0`
-        taskqueryUrl = `https://pan.baidu.com/share/taskquery?taskid=1052678625270016&channel=chunlei&web=1&app_id=250528&bdstoken=${meta.bdstoken}&clienttype=0`
+      var bdstoken = scriptTag.text.match(/(?<=bdstoken"\s*:\s*")(.*)(?=","photo")/).pop().trim()
+      
+      if (bdstoken) {
+        filemanagerUrl = `https://pan.baidu.com/api/filemanager?opera=rename&async=2&onnest=fail&channel=chunlei&web=1&app_id=250528&bdstoken=${bdstoken}&clienttype=0`
+        taskqueryUrl = `https://pan.baidu.com/share/taskquery?taskid=1052678625270016&channel=chunlei&web=1&app_id=250528&bdstoken=${bdstoken}&clienttype=0`
       }
     } catch (e) {
       console.error(e)
